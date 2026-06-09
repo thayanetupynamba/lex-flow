@@ -7,8 +7,10 @@ from .opcodes import (
 )
 from .opcodes_apollo import register_apollo_opcodes
 from .opcodes_gcs import register_gcs_opcodes
+from .opcodes_google_workspace import register_google_workspace_opcodes
 from .opcodes_http import register_http_opcodes
 from .opcodes_pgvector import register_pgvector_opcodes
+from .opcodes_polaris import register_polaris_opcodes
 from .opcodes_pubsub import register_pubsub_opcodes
 from .opcodes_clicksign import register_clicksign_opcodes
 from .opcodes_hubspot import register_hubspot_opcodes
@@ -29,8 +31,10 @@ from . import opcodes_tasks  # noqa: F401
 # Register optional opcode modules (require external dependencies)
 register_apollo_opcodes()
 register_gcs_opcodes()
+register_google_workspace_opcodes()
 register_http_opcodes()
 register_pgvector_opcodes()
+register_polaris_opcodes()
 register_pubsub_opcodes()
 register_clicksign_opcodes()
 register_hubspot_opcodes()
