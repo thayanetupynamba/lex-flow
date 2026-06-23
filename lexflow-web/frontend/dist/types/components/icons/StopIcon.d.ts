@@ -1,4 +1,4 @@
 export declare const StopIcon: {
-    ({ size, className, ...props }: import("./Icon").IconProps): import("react/jsx-runtime").JSX.Element;
+    ({ size, className, ...props }: import("./Icon").IconProps): import("react").JSX.Element;
     displayName: string;
 };

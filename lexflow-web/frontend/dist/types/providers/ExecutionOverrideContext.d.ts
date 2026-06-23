@@ -5,6 +5,6 @@ interface ExecutionOverrideWrapperProps {
     override?: ExecuteOverride;
     children: ReactNode;
 }
-export declare function ExecutionOverrideWrapper({ override, children, }: ExecutionOverrideWrapperProps): import("react/jsx-runtime").JSX.Element;
+export declare function ExecutionOverrideWrapper({ override, children, }: ExecutionOverrideWrapperProps): import("react").JSX.Element;
 export declare function useExecutionOverride(): ExecuteOverride | null;
 export {};

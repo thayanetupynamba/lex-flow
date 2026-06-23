@@ -14,6 +14,6 @@ interface LibraryThemeProviderProps {
     initialTheme?: ThemeOption;
     persist?: boolean;
 }
-export declare function LibraryThemeProvider({ children, instanceId, containerRef, initialTheme, persist, }: LibraryThemeProviderProps): import("react/jsx-runtime").JSX.Element;
+export declare function LibraryThemeProvider({ children, instanceId, containerRef, initialTheme, persist, }: LibraryThemeProviderProps): import("react").JSX.Element;
 export declare function useLibraryTheme(): ThemeContextValue;
 export { ThemeProvider, useTheme, ThemeContext } from "@/lib/theme";

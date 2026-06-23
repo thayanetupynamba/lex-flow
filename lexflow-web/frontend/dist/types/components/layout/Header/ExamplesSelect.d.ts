@@ -1,2 +1,2 @@
 import type { ExamplesSelectProps } from "./types";
-export declare function ExamplesSelect({ className }: ExamplesSelectProps): import("react/jsx-runtime").JSX.Element | null;
+export declare function ExamplesSelect({ className }: ExamplesSelectProps): import("react").JSX.Element | null;

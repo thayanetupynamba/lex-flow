@@ -1,1 +1,1 @@
-export declare function VariableDragPreview(): import("react/jsx-runtime").JSX.Element | null;
+export declare function VariableDragPreview(): import("react").JSX.Element | null;

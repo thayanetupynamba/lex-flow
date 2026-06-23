@@ -1,1 +1,1 @@
-export declare function DragPreview(): import("react/jsx-runtime").JSX.Element | null;
+export declare function DragPreview(): import("react").JSX.Element | null;

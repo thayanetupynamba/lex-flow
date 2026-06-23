@@ -4,6 +4,6 @@ interface BackendProviderWrapperProps {
     provider: BackendProvider;
     children: ReactNode;
 }
-export declare function BackendProviderWrapper({ provider, children, }: BackendProviderWrapperProps): import("react/jsx-runtime").JSX.Element;
+export declare function BackendProviderWrapper({ provider, children, }: BackendProviderWrapperProps): import("react").JSX.Element;
 export declare function useBackendProvider(): BackendProvider;
 export {};

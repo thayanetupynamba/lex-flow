@@ -1,1 +1,1 @@
-export declare function WireDragPreview(): import("react/jsx-runtime").JSX.Element | null;
+export declare function WireDragPreview(): import("react").JSX.Element | null;

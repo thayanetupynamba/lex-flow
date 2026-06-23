@@ -1,1 +1,1 @@
-export declare function OrphanDragPreview(): import("react/jsx-runtime").JSX.Element | null;
+export declare function OrphanDragPreview(): import("react").JSX.Element | null;

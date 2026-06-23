@@ -1,1 +1,1 @@
-export declare function NodeSearch(): import("react/jsx-runtime").JSX.Element;
+export declare function NodeSearch(): import("react").JSX.Element;

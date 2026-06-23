@@ -4,5 +4,5 @@ interface LiteEditorProps extends CodeEditorProps {
     onChange: (value: string) => void;
     isParsing?: boolean;
 }
-export declare function LiteEditor({ className, value, onChange, isParsing }: LiteEditorProps): import("react/jsx-runtime").JSX.Element;
+export declare function LiteEditor({ className, value, onChange, isParsing }: LiteEditorProps): import("react").JSX.Element;
 export {};
