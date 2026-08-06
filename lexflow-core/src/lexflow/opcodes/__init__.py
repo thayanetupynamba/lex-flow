@@ -7,6 +7,8 @@ from .opcodes import (
 )
 from .opcodes_apollo import register_apollo_opcodes
 from .opcodes_gcs import register_gcs_opcodes
+from .opcodes_gmail import register_gmail_opcodes
+from .opcodes_gtasks import register_gtasks_opcodes
 from .opcodes_http import register_http_opcodes
 from .opcodes_pgvector import register_pgvector_opcodes
 from .opcodes_pubsub import register_pubsub_opcodes
@@ -29,6 +31,8 @@ from . import opcodes_tasks  # noqa: F401
 # Register optional opcode modules (require external dependencies)
 register_apollo_opcodes()
 register_gcs_opcodes()
+register_gmail_opcodes()
+register_gtasks_opcodes()
 register_http_opcodes()
 register_pgvector_opcodes()
 register_pubsub_opcodes()
