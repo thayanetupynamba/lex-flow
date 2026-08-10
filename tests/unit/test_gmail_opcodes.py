@@ -2,6 +2,7 @@
 
 import base64
 import importlib.util
+import os
 from email import message_from_bytes
 from email.header import decode_header, make_header
 from unittest.mock import Mock, patch
@@ -145,6 +146,7 @@ class TestGmailCreateClient:
         with (
             patch("asyncio.to_thread", side_effect=fake_to_thread),
             patch("os.path.isfile", return_value=True),
+            patch.dict(os.environ, {"GOOGLE_DWD_SUBJECT_ALLOWLIST": "vendedora@x.com"}),
             patch(
                 "lexflow.opcodes._google_auth.Credentials.from_service_account_file",
                 return_value=base_creds,
@@ -159,6 +161,51 @@ class TestGmailCreateClient:
             )
             base_creds.with_subject.assert_called_once_with("vendedora@x.com")
             mock_build.assert_called_once_with("gmail", "v1", credentials=impersonated)
+
+    async def test_subject_rejected_without_allowlist(self):
+        with (
+            patch("asyncio.to_thread", side_effect=fake_to_thread),
+            patch("os.path.isfile", return_value=True),
+            patch.dict(os.environ, {}, clear=True),
+            pytest.raises(
+                ValueError, match="is not allowed for domain-wide delegation"
+            ),
+        ):
+            await default_registry.call(
+                "gmail_create_client", ["/path/sa.json", "vendedora@x.com"]
+            )
+
+    async def test_subject_rejected_when_not_in_allowlist(self):
+        with (
+            patch("asyncio.to_thread", side_effect=fake_to_thread),
+            patch("os.path.isfile", return_value=True),
+            patch.dict(os.environ, {"GOOGLE_DWD_SUBJECT_ALLOWLIST": "outra@x.com"}),
+            pytest.raises(
+                ValueError, match="is not allowed for domain-wide delegation"
+            ),
+        ):
+            await default_registry.call(
+                "gmail_create_client", ["/path/sa.json", "vendedora@x.com"]
+            )
+
+    async def test_subject_allowed_via_domain_entry(self):
+        base_creds = Mock()
+        impersonated = Mock()
+        base_creds.with_subject.return_value = impersonated
+        with (
+            patch("asyncio.to_thread", side_effect=fake_to_thread),
+            patch("os.path.isfile", return_value=True),
+            patch.dict(os.environ, {"GOOGLE_DWD_SUBJECT_ALLOWLIST": "@x.com"}),
+            patch(
+                "lexflow.opcodes._google_auth.Credentials.from_service_account_file",
+                return_value=base_creds,
+            ),
+            patch("lexflow.opcodes._google_auth.build", return_value=Mock()),
+        ):
+            await default_registry.call(
+                "gmail_create_client", ["/path/sa.json", "vendedora@x.com"]
+            )
+            base_creds.with_subject.assert_called_once_with("vendedora@x.com")
 
     async def test_create_client_uses_custom_scopes(self):
         mock_creds = Mock()

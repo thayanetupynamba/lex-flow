@@ -4,6 +4,21 @@ Centralizes the credentials_path validation, service-account loading, domain-wid
 delegation (subject impersonation), and Application Default Credentials fallback
 used by opcodes_gmail.py and opcodes_gtasks.py, so the two stay in sync as this
 logic evolves instead of drifting apart.
+
+Domain-wide delegation allowlist:
+    A service account authorized for domain-wide delegation in the Admin
+    Console can impersonate ANY user in the domain. Since ``subject`` is a
+    workflow-supplied argument, an unrestricted workflow (or one built from
+    untrusted/LLM-influenced input) could otherwise impersonate any mailbox.
+    ``GOOGLE_DWD_SUBJECT_ALLOWLIST`` restricts which ``subject`` values
+    ``build_google_service`` will accept:
+
+    - Unset or empty: impersonation is disabled entirely (``subject`` always
+      rejected). This is the fail-closed default.
+    - A comma-separated list of entries, each either a full email address
+      (exact match, case-insensitive) or ``@domain.com`` (matches any address
+      at that domain, case-insensitive). Example:
+      ``GOOGLE_DWD_SUBJECT_ALLOWLIST=vendas@empresa.com,@suporte.empresa.com``
 """
 
 from __future__ import annotations
@@ -20,6 +35,30 @@ try:
     GOOGLE_AUTH_AVAILABLE = True
 except ImportError:
     GOOGLE_AUTH_AVAILABLE = False
+
+DWD_SUBJECT_ALLOWLIST_ENV_VAR = "GOOGLE_DWD_SUBJECT_ALLOWLIST"
+
+
+def _subject_allowed(subject: str) -> bool:
+    """Check ``subject`` against GOOGLE_DWD_SUBJECT_ALLOWLIST.
+
+    Args:
+        subject: The email address requested for impersonation.
+
+    Returns:
+        True if the allowlist is set and contains an exact match for
+        ``subject`` or a ``@domain`` entry matching its domain. False
+        (including when the env var is unset/empty) otherwise.
+    """
+    raw = os.environ.get(DWD_SUBJECT_ALLOWLIST_ENV_VAR, "")
+    entries = [entry.strip().lower() for entry in raw.split(",") if entry.strip()]
+    subject_lower = subject.lower()
+    return any(
+        subject_lower.endswith(entry)
+        if entry.startswith("@")
+        else subject_lower == entry
+        for entry in entries
+    )
 
 
 async def build_google_service(
@@ -38,21 +77,27 @@ async def build_google_service(
         credentials_path: Path to a service account JSON file. If None, uses
             Application Default Credentials (ADC).
         subject: Email to impersonate via domain-wide delegation. Only valid
-            together with a service account ``credentials_path``.
-            Note: with a service account authorized in the Admin Console,
-            ``subject`` can impersonate ANY user in the domain — restrict
-            which subjects a workflow may pass here at the caller/app layer.
+            together with a service account ``credentials_path``, and only if
+            ``subject`` is present in ``GOOGLE_DWD_SUBJECT_ALLOWLIST`` (see
+            module docstring) — impersonation is denied by default.
 
     Returns:
         The built googleapiclient service (Resource) object.
 
     Raises:
         ValueError: If ``credentials_path`` contains '..' components, doesn't
-            end in ``.json``, or doesn't exist; or if ``subject`` is given
-            without a service account ``credentials_path``.
+            end in ``.json``, or doesn't exist; if ``subject`` is given
+            without a service account ``credentials_path``; or if ``subject``
+            is not allowed by ``GOOGLE_DWD_SUBJECT_ALLOWLIST``.
     """
     scopes = list(scopes)
     if credentials_path:
+        if subject and not _subject_allowed(subject):
+            raise ValueError(
+                f"subject {subject!r} is not allowed for domain-wide delegation "
+                f"impersonation. Add it (or its @domain) to the "
+                f"{DWD_SUBJECT_ALLOWLIST_ENV_VAR} environment variable."
+            )
         if ".." in os.path.normpath(credentials_path).split(os.sep):
             raise ValueError("credentials_path must not contain '..' path components")
         resolved = os.path.realpath(credentials_path)

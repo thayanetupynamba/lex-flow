@@ -158,10 +158,13 @@ def register_gmail_opcodes():
             credentials_path: Path to a service account JSON file. If None,
                 uses Application Default Credentials (ADC).
             subject: Mailbox email to impersonate via domain-wide delegation.
-                Only valid together with a service account ``credentials_path``.
-                Note: with a service account authorized in the Admin Console,
-                ``subject`` can impersonate ANY user in the domain — restrict
-                which subjects a workflow may pass here at the caller/app layer.
+                Only valid together with a service account ``credentials_path``,
+                and only if ``subject`` is listed in the
+                ``GOOGLE_DWD_SUBJECT_ALLOWLIST`` environment variable (comma-
+                separated exact addresses and/or ``@domain.com`` entries).
+                Impersonation is denied by default (empty/unset allowlist),
+                since an authorized service account can otherwise impersonate
+                ANY user in the domain.
             scopes: OAuth scopes to request (default: ``gmail.compose``, which
                 covers creating/updating drafts and sending). Narrow this to
                 least privilege if a workflow only needs to create drafts.
