@@ -30,17 +30,15 @@ API reference: https://developers.google.com/tasks/reference/rest
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 try:
-    from google.oauth2.service_account import Credentials
-    from google.auth import default as google_auth_default
-    from googleapiclient.discovery import build
     from googleapiclient.errors import HttpError
 
-    GTASKS_AVAILABLE = True
+    from ._google_auth import GOOGLE_AUTH_AVAILABLE, build_google_service
+
+    GTASKS_AVAILABLE = GOOGLE_AUTH_AVAILABLE
 except ImportError:
     GTASKS_AVAILABLE = False
 
@@ -183,32 +181,9 @@ def register_gtasks_opcodes():
         Example with ADC (after 'gcloud auth application-default login'):
             # No arguments needed
         """
-        request_scopes = scopes or SCOPES
-        if credentials_path:
-            if ".." in os.path.normpath(credentials_path).split(os.sep):
-                raise ValueError(
-                    "credentials_path must not contain '..' path components"
-                )
-            resolved = os.path.realpath(credentials_path)
-            if not resolved.endswith(".json"):
-                raise ValueError("credentials_path must be a .json file")
-            if not os.path.isfile(resolved):
-                raise ValueError(f"credentials file not found: {credentials_path}")
-            credentials = await asyncio.to_thread(
-                Credentials.from_service_account_file, resolved, scopes=request_scopes
-            )
-            if subject:
-                credentials = credentials.with_subject(subject)
-        else:
-            if subject:
-                raise ValueError(
-                    "subject impersonation requires a service account credentials_path"
-                )
-            credentials, _ = await asyncio.to_thread(
-                google_auth_default, scopes=request_scopes
-            )
-
-        service = await asyncio.to_thread(build, "tasks", "v1", credentials=credentials)
+        service = await build_google_service(
+            "tasks", "v1", scopes or SCOPES, credentials_path, subject
+        )
         return TasksClient(service)
 
     @opcode(category="gtasks")

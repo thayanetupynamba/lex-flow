@@ -74,11 +74,11 @@ class TestGTasksCreateClient:
         with (
             patch("asyncio.to_thread", side_effect=fake_to_thread),
             patch(
-                "lexflow.opcodes.opcodes_gtasks.google_auth_default",
+                "lexflow.opcodes._google_auth.google_auth_default",
                 return_value=(mock_creds, "project-id"),
             ),
             patch(
-                "lexflow.opcodes.opcodes_gtasks.build",
+                "lexflow.opcodes._google_auth.build",
                 return_value=Mock(),
             ) as mock_build,
         ):
@@ -115,11 +115,11 @@ class TestGTasksCreateClient:
             patch("asyncio.to_thread", side_effect=fake_to_thread),
             patch("os.path.isfile", return_value=True),
             patch(
-                "lexflow.opcodes.opcodes_gtasks.Credentials.from_service_account_file",
+                "lexflow.opcodes._google_auth.Credentials.from_service_account_file",
                 return_value=base_creds,
             ),
             patch(
-                "lexflow.opcodes.opcodes_gtasks.build",
+                "lexflow.opcodes._google_auth.build",
                 return_value=Mock(),
             ) as mock_build,
         ):
@@ -134,10 +134,10 @@ class TestGTasksCreateClient:
         with (
             patch("asyncio.to_thread", side_effect=fake_to_thread),
             patch(
-                "lexflow.opcodes.opcodes_gtasks.google_auth_default",
+                "lexflow.opcodes._google_auth.google_auth_default",
                 return_value=(mock_creds, "project-id"),
             ) as mock_default,
-            patch("lexflow.opcodes.opcodes_gtasks.build", return_value=Mock()),
+            patch("lexflow.opcodes._google_auth.build", return_value=Mock()),
         ):
             await default_registry.call(
                 "gtasks_create_client",
