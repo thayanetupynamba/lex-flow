@@ -24,6 +24,10 @@ Required scope:
     https://www.googleapis.com/auth/tasks
     (``tasks.readonly`` only covers get/list; create/patch/delete need ``tasks``.)
 
+Concurrency:
+    TasksClient is not thread-safe (see its docstring) — don't share one
+    client across concurrent fork/spawn branches.
+
 API reference: https://developers.google.com/tasks/reference/rest
 """
 
@@ -48,7 +52,14 @@ _VALID_STATUSES = ("needsAction", "completed")
 
 
 class TasksClient:
-    """Reusable Google Tasks client."""
+    """Reusable Google Tasks client.
+
+    Not thread-safe: wraps a single httplib2.Http connection underneath,
+    which is not safe for concurrent requests. If a workflow's same
+    ``{ node: create_client }`` output is reused across concurrent
+    fork/spawn branches, create one client per branch instead of sharing
+    one (identical restriction to SheetsClient in opcodes_sheets.py).
+    """
 
     def __init__(self, service):
         self.service = service
@@ -175,7 +186,9 @@ def register_gtasks_opcodes():
             scopes: OAuth scopes to request (default: ``.../auth/tasks``).
 
         Returns:
-            TasksClient object to use with the other gtasks_* opcodes.
+            TasksClient object to use with the other gtasks_* opcodes. Not
+            thread-safe — see TasksClient's docstring before reusing it
+            across concurrent fork/spawn branches.
 
         Example with Service Account impersonating a user:
             credentials_path: "/path/to/service-account.json"

@@ -25,6 +25,10 @@ Required scope:
     (Covers creating/updating drafts AND sending. ``gmail.send`` alone cannot
     create drafts.)
 
+Concurrency:
+    GmailClient is not thread-safe (see its docstring) — don't share one
+    client across concurrent fork/spawn branches.
+
 API reference: https://developers.google.com/gmail/api/reference/rest
 """
 
@@ -52,7 +56,14 @@ _HEADER_INJECTION_RE = re.compile(r"[\r\n]")
 
 
 class GmailClient:
-    """Reusable Gmail client scoped to the authenticated user ("me")."""
+    """Reusable Gmail client scoped to the authenticated user ("me").
+
+    Not thread-safe: wraps a single httplib2.Http connection underneath,
+    which is not safe for concurrent requests. If a workflow's same
+    ``{ node: create_client }`` output is reused across concurrent
+    fork/spawn branches, create one client per branch instead of sharing
+    one (identical restriction to SheetsClient in opcodes_sheets.py).
+    """
 
     def __init__(self, service):
         self.service = service
@@ -170,7 +181,9 @@ def register_gmail_opcodes():
                 least privilege if a workflow only needs to create drafts.
 
         Returns:
-            GmailClient object to use with the other gmail_* opcodes.
+            GmailClient object to use with the other gmail_* opcodes. Not
+            thread-safe — see GmailClient's docstring before reusing it
+            across concurrent fork/spawn branches.
 
         Example with Service Account impersonating a mailbox:
             credentials_path: "/path/to/service-account.json"
