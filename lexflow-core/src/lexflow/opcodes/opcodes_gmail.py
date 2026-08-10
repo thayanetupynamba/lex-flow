@@ -33,23 +33,46 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
+import re
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import TYPE_CHECKING, Any, Dict, Optional
-
-if TYPE_CHECKING:
-    from google.auth.credentials import Credentials
+from typing import Any, Dict, List, Optional
 
 try:
     from google.oauth2.service_account import Credentials
     from google.auth import default as google_auth_default
     from googleapiclient.discovery import build
+    from googleapiclient.errors import HttpError
 
     GMAIL_AVAILABLE = True
 except ImportError:
     GMAIL_AVAILABLE = False
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.compose"]
+SCOPES = ("https://www.googleapis.com/auth/gmail.compose",)
+
+_HEADER_INJECTION_RE = re.compile(r"[\r\n]")
+
+
+class GmailClient:
+    """Reusable Gmail client scoped to the authenticated user ("me")."""
+
+    def __init__(self, service):
+        self.service = service
+        self.users = service.users()
+
+
+async def _execute(request) -> Any:
+    """Run a googleapiclient request off-thread, sanitizing API errors.
+
+    Raises:
+        RuntimeError: If the Gmail API returns an error. The raw ``HttpError``
+            (whose ``str()`` includes the request URI and response body) is
+            not propagated; only its status and reason are.
+    """
+    try:
+        return await asyncio.to_thread(request.execute)
+    except HttpError as e:
+        raise RuntimeError(f"Gmail API error ({e.status_code}): {e.reason}") from e
 
 
 def _build_raw(
@@ -72,7 +95,22 @@ def _build_raw(
 
     Returns:
         The URL-safe base64 string for the Gmail ``raw`` field.
+
+    Raises:
+        ValueError: If ``to`` is empty, or if ``to``/``cc``/``bcc``/``subject``
+            contain a carriage return or newline (header injection).
     """
+    if not to or not isinstance(to, str):
+        raise ValueError("to must be a non-empty string")
+    for field_name, value in (
+        ("to", to),
+        ("cc", cc),
+        ("bcc", bcc),
+        ("subject", subject),
+    ):
+        if value and _HEADER_INJECTION_RE.search(value):
+            raise ValueError(f"{field_name} must not contain line breaks")
+
     if html:
         message: Any = MIMEMultipart("alternative")
         message.attach(MIMEText(body or "", "plain"))
@@ -95,13 +133,6 @@ def register_gmail_opcodes():
 
     from .opcodes import opcode, register_category
 
-    class GmailClient:
-        """Reusable Gmail client scoped to the authenticated user ("me")."""
-
-        def __init__(self, service):
-            self.service = service
-            self.users = service.users()
-
     register_category(
         id="gmail",
         label="Gmail Operations",
@@ -121,6 +152,7 @@ def register_gmail_opcodes():
     async def gmail_create_client(
         credentials_path: Optional[str] = None,
         subject: Optional[str] = None,
+        scopes: Optional[List[str]] = None,
     ) -> GmailClient:
         """Create a Gmail client for API operations.
 
@@ -129,6 +161,12 @@ def register_gmail_opcodes():
                 uses Application Default Credentials (ADC).
             subject: Mailbox email to impersonate via domain-wide delegation.
                 Only valid together with a service account ``credentials_path``.
+                Note: with a service account authorized in the Admin Console,
+                ``subject`` can impersonate ANY user in the domain — restrict
+                which subjects a workflow may pass here at the caller/app layer.
+            scopes: OAuth scopes to request (default: ``gmail.compose``, which
+                covers creating/updating drafts and sending). Narrow this to
+                least privilege if a workflow only needs to create drafts.
 
         Returns:
             GmailClient object to use with the other gmail_* opcodes.
@@ -140,6 +178,7 @@ def register_gmail_opcodes():
         Example with ADC (after 'gcloud auth application-default login'):
             # No arguments needed
         """
+        request_scopes = scopes or SCOPES
         if credentials_path:
             if ".." in os.path.normpath(credentials_path).split(os.sep):
                 raise ValueError(
@@ -151,7 +190,7 @@ def register_gmail_opcodes():
             if not os.path.isfile(resolved):
                 raise ValueError(f"credentials file not found: {credentials_path}")
             credentials = await asyncio.to_thread(
-                Credentials.from_service_account_file, resolved, scopes=SCOPES
+                Credentials.from_service_account_file, resolved, scopes=request_scopes
             )
             if subject:
                 credentials = credentials.with_subject(subject)
@@ -160,10 +199,28 @@ def register_gmail_opcodes():
                 raise ValueError(
                     "subject impersonation requires a service account credentials_path"
                 )
-            credentials, _ = await asyncio.to_thread(google_auth_default, scopes=SCOPES)
+            credentials, _ = await asyncio.to_thread(
+                google_auth_default, scopes=request_scopes
+            )
 
         service = await asyncio.to_thread(build, "gmail", "v1", credentials=credentials)
         return GmailClient(service)
+
+    @opcode(category="gmail")
+    async def gmail_close_client(client: GmailClient) -> bool:
+        """Close the Gmail client and release the underlying HTTP connection.
+
+        Args:
+            client: GmailClient from gmail_create_client.
+
+        Returns:
+            True when closed successfully.
+
+        Example:
+            client: { node: create_client }
+        """
+        await asyncio.to_thread(client.service.close)
+        return True
 
     # ========================================================================
     # Compose Operations
@@ -203,7 +260,7 @@ def register_gmail_opcodes():
         request = client.users.drafts().create(
             userId="me", body={"message": {"raw": raw}}
         )
-        return await asyncio.to_thread(request.execute)
+        return await _execute(request)
 
     @opcode(category="gmail")
     async def gmail_send_message(
@@ -216,6 +273,17 @@ def register_gmail_opcodes():
         html: str = "",
     ) -> Dict[str, Any]:
         """Send an email immediately as the authenticated user.
+
+        Warning:
+            Not idempotent and not cancellable: a timeout followed by a
+            workflow retry/fallback can send the message twice. There is no
+            dedupe key on this opcode.
+
+            If exposed as an agent tool (e.g. via ``opcodes_pydantic_ai``),
+            this is an arbitrary-send primitive reachable by prompt injection
+            in any content the agent processes. Prefer allowlisting only
+            ``gmail_create_draft`` for agent tool use, reserving this opcode
+            for direct workflow calls.
 
         Args:
             client: GmailClient from gmail_create_client.
@@ -237,4 +305,4 @@ def register_gmail_opcodes():
         """
         raw = _build_raw(to, subject, body, cc, bcc, html)
         request = client.users.messages().send(userId="me", body={"raw": raw})
-        return await asyncio.to_thread(request.execute)
+        return await _execute(request)
