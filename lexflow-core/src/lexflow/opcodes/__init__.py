@@ -1,4 +1,4 @@
-from .opcodes import (
+﻿from .opcodes import (
     CategoryInfo,
     OpcodeRegistry,
     default_registry,
@@ -8,6 +8,7 @@ from .opcodes import (
 from .opcodes_apollo import register_apollo_opcodes
 from .opcodes_gcs import register_gcs_opcodes
 from .opcodes_gmail import register_gmail_opcodes
+from .opcodes_gslides import register_gslides_opcodes
 from .opcodes_gtasks import register_gtasks_opcodes
 from .opcodes_http import register_http_opcodes
 from .opcodes_pgvector import register_pgvector_opcodes
@@ -32,6 +33,7 @@ from . import opcodes_tasks  # noqa: F401
 register_apollo_opcodes()
 register_gcs_opcodes()
 register_gmail_opcodes()
+register_gslides_opcodes()
 register_gtasks_opcodes()
 register_http_opcodes()
 register_pgvector_opcodes()
