@@ -8,6 +8,7 @@ Authentication:
     https://developers.clicksign.com/docs/api-authentication
 """
 
+import json
 from typing import Any, Dict, List, Optional
 
 from .opcodes import opcode, register_category
@@ -67,16 +68,43 @@ class ClicksignClient:
         """Make an HTTP request to Clicksign API."""
         url = f"{self.base_url}{endpoint}"
 
+        # Pre-serialize to UTF-8 bytes and set the JSON:API media type per
+        # request, so the wire contract is explicit at the call site instead
+        # of depending on how the session was constructed. (aiohttp merges
+        # session default headers before payload headers, so json= also
+        # works today — but a str body via data= would silently degrade to
+        # text/plain if the session default were ever removed; bytes plus an
+        # explicit header make that refactor-proof.)
+        body = (
+            None
+            if json_data is None
+            else json.dumps(json_data, ensure_ascii=False).encode("utf-8")
+        )
+
         async with self._session.request(
-            method, url, params=params, json=json_data
+            method,
+            url,
+            params=params,
+            data=body,
+            headers={
+                "Content-Type": "application/vnd.api+json",
+                "Accept": "application/vnd.api+json",
+            },
         ) as response:
             if response.status == 204:
                 return {}
 
-            data = await response.json()
+            # Read as text first: error responses are not guaranteed to be
+            # JSON (a 502/503 from a proxy is HTML), and response.json()
+            # raising ContentTypeError here would mask the status mapping
+            # below with an exception no caller is documented to expect.
+            text = await response.text()
 
             if response.status >= 400:
-                errors = data.get("errors", [])
+                try:
+                    errors = json.loads(text).get("errors", [])
+                except (ValueError, AttributeError):
+                    errors = []
                 if errors:
                     err = errors[0]
                     detail = err.get("detail", "Unknown error")
@@ -86,7 +114,9 @@ class ClicksignClient:
                     )
                 raise ValueError(f"Clicksign API error ({response.status})")
 
-            return data
+            if not text:
+                return {}
+            return json.loads(text)
 
     async def get(
         self, endpoint: str, params: Optional[Dict[str, Any]] = None
@@ -192,7 +222,8 @@ def register_clicksign_opcodes():
             name: Name of the envelope
             locale: Envelope locale (default: pt-BR)
             auto_close: Auto-close after all signers sign (default: True)
-            remind_interval: Reminder interval in days (default: 3)
+            remind_interval: Reminder interval in days — the API only
+                accepts 1, 2, 3, 7 or 14 (default: 3)
             block_after_refusal: Block envelope after a signer refuses (default: False)
             deadline_at: Optional deadline in ISO 8601 format
 
@@ -207,6 +238,16 @@ def register_clicksign_opcodes():
         """
         if not name or not name.strip():
             raise ValueError("name cannot be empty")
+        # Fail locally, before any network call: the API only accepts this
+        # closed set and rejects anything else with an opaque 4xx mid-flow.
+        # (bool is an int subclass and floats compare equal to ints, so both
+        # are checked explicitly.)
+        if (
+            isinstance(remind_interval, bool)
+            or not isinstance(remind_interval, int)
+            or remind_interval not in (1, 2, 3, 7, 14)
+        ):
+            raise ValueError("remind_interval must be one of: 1, 2, 3, 7, 14")
 
         attributes: Dict[str, Any] = {
             "name": name,
@@ -569,7 +610,7 @@ def register_clicksign_opcodes():
             has_documentation: Whether the signer has documentation (default: False)
             birthday: Birthday in ISO 8601 format (e.g., "1990-01-15")
             refusable: Whether the signer can refuse to sign (default: False)
-            group: Signing group/order (default: 0)
+            group: Signing group/order (default: 1)
             communicate_events: Event notification config (e.g., {"sign": "email"})
 
         Returns:

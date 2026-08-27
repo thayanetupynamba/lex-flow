@@ -1,6 +1,7 @@
 """Tests for Clicksign digital signing opcodes."""
 
 import importlib.util
+import json
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -31,16 +32,36 @@ def _mock_client():
     return client
 
 
-def _mock_response(status=200, json_data=None):
-    """Create a mock aiohttp response as an async context manager."""
+def _mock_response(status=200, json_data=None, text=None):
+    """Create a mock aiohttp response as an async context manager.
+
+    The client reads the body via ``response.text()`` (never ``.json()``),
+    so the mock serializes ``json_data`` — or serves ``text`` verbatim for
+    non-JSON bodies (proxy HTML, empty responses).
+    """
     response = AsyncMock()
     response.status = status
-    response.json = AsyncMock(return_value=json_data or {})
+    if text is None:
+        text = json.dumps(json_data if json_data is not None else {})
+    response.text = AsyncMock(return_value=text)
 
     ctx = MagicMock()
     ctx.__aenter__ = AsyncMock(return_value=response)
     ctx.__aexit__ = AsyncMock(return_value=False)
     return ctx
+
+
+def _sent_body(client):
+    """Return the JSON body the client sent, asserting the wire contract.
+
+    Every write must go out pre-serialized via ``data=`` with the JSON:API
+    media type set explicitly on the request — this helper is the single
+    place that pins both invariants for all tests.
+    """
+    kwargs = client._session.request.call_args[1]
+    assert "json" not in kwargs
+    assert kwargs["headers"]["Content-Type"] == "application/vnd.api+json"
+    return json.loads(kwargs["data"])
 
 
 # ============================================================================
@@ -62,6 +83,34 @@ class TestClicksignClient:
     async def test_repr_hides_token(self):
         client = _mock_client()
         assert "test-token" not in repr(client)
+
+    async def test_non_json_error_body_maps_to_value_error(self):
+        """A 502 from a proxy carries HTML, not JSON:API — the status must
+        still surface as the documented ValueError, never ContentTypeError."""
+        client = _mock_client()
+        client._session.request = MagicMock(
+            return_value=_mock_response(502, text="<html>Bad gateway</html>")
+        )
+        with pytest.raises(ValueError, match=r"Clicksign API error \(502\)"):
+            await client.get("/envelopes")
+
+    async def test_empty_success_body_returns_empty_dict(self):
+        client = _mock_client()
+        client._session.request = MagicMock(return_value=_mock_response(200, text=""))
+        result = await client.get("/envelopes")
+        assert result == {}
+
+    async def test_request_sets_json_api_content_type(self):
+        """The JSON:API media type is pinned per request, not inherited."""
+        client = _mock_client()
+        client._session.request = MagicMock(
+            return_value=_mock_response(200, {"data": {}})
+        )
+        await client.post("/envelopes", json_data={"data": {}})
+        kwargs = client._session.request.call_args[1]
+        assert kwargs["headers"]["Content-Type"] == "application/vnd.api+json"
+        assert kwargs["headers"]["Accept"] == "application/vnd.api+json"
+        assert isinstance(kwargs["data"], bytes)
 
     async def test_error_response_without_errors_array(self):
         client = _mock_client()
@@ -166,11 +215,19 @@ class TestClicksignEnvelopes:
         call_args = client._session.request.call_args
         assert call_args[0][0] == "POST"
         assert "/envelopes" in call_args[0][1]
-        body = call_args[1]["json"]
+        body = _sent_body(client)
         assert body["data"]["type"] == "envelopes"
         assert body["data"]["attributes"]["name"] == "Test Envelope"
         assert body["data"]["attributes"]["remind_interval"] == 3
-        assert isinstance(body["data"]["attributes"]["remind_interval"], int)
+
+    async def test_create_envelope_invalid_remind_interval_raises_error(self):
+        """The API only accepts 1, 2, 3, 7, 14 — fail locally, not mid-flow."""
+        for bad in (0, 5, 30, None, 3.0, True, "3"):
+            with pytest.raises(ValueError, match="remind_interval"):
+                await default_registry.call(
+                    "clicksign_create_envelope",
+                    [_mock_client(), "Test Envelope", "pt-BR", True, bad],
+                )
 
     async def test_create_envelope_empty_name_raises_error(self):
         with pytest.raises(ValueError, match="name cannot be empty"):
@@ -203,8 +260,7 @@ class TestClicksignEnvelopes:
         )
         assert result == expected
 
-        call_args = client._session.request.call_args
-        body = call_args[1]["json"]
+        body = _sent_body(client)
         assert body["data"]["attributes"]["deadline_at"] == "2025-12-31T23:59:59Z"
 
     async def test_get_envelope(self):
@@ -274,7 +330,7 @@ class TestClicksignEnvelopes:
 
         call_args = client._session.request.call_args
         assert call_args[0][0] == "PATCH"
-        body = call_args[1]["json"]
+        body = _sent_body(client)
         assert body["data"]["id"] == "env-123"
         assert body["data"]["attributes"]["status"] == "running"
 
@@ -290,7 +346,7 @@ class TestClicksignEnvelopes:
 
         call_args = client._session.request.call_args
         assert call_args[0][0] == "PATCH"
-        body = call_args[1]["json"]
+        body = _sent_body(client)
         assert body["data"]["attributes"]["status"] == "canceled"
 
     async def test_delete_envelope(self):
@@ -319,7 +375,7 @@ class TestClicksignDocuments:
         call_args = client._session.request.call_args
         assert call_args[0][0] == "POST"
         assert "/envelopes/env-123/documents" in call_args[0][1]
-        body = call_args[1]["json"]
+        body = _sent_body(client)
         assert body["data"]["type"] == "documents"
         assert body["data"]["attributes"]["filename"] == "contract.pdf"
         assert body["data"]["attributes"]["template"]["data"] == {"name": "John"}
@@ -338,7 +394,7 @@ class TestClicksignDocuments:
 
         call_args = client._session.request.call_args
         assert call_args[0][0] == "POST"
-        body = call_args[1]["json"]
+        body = _sent_body(client)
         assert body["data"]["attributes"]["content_base64"] == "JVBERi0xLjQK"
         assert body["data"]["attributes"]["filename"] == "contract.pdf"
 
@@ -384,7 +440,7 @@ class TestClicksignDocuments:
         call_args = client._session.request.call_args
         assert call_args[0][0] == "PATCH"
         assert "/envelopes/env-123/documents/doc-123" in call_args[0][1]
-        body = call_args[1]["json"]
+        body = _sent_body(client)
         assert body["data"]["attributes"]["filename"] == "updated_contract.pdf"
 
     async def test_delete_document(self):
@@ -412,7 +468,7 @@ class TestClicksignSigners:
 
         call_args = client._session.request.call_args
         assert call_args[0][0] == "POST"
-        body = call_args[1]["json"]
+        body = _sent_body(client)
         assert body["data"]["type"] == "signers"
         attrs = body["data"]["attributes"]
         assert attrs["name"] == "John Doe"
@@ -476,8 +532,7 @@ class TestClicksignSigners:
         )
         assert result == expected
 
-        call_args = client._session.request.call_args
-        body = call_args[1]["json"]
+        body = _sent_body(client)
         attrs = body["data"]["attributes"]
         assert attrs["phone_number"] == "+5511999999999"
         assert attrs["documentation"] == "12345678900"
@@ -521,7 +576,7 @@ class TestClicksignRequirements:
 
         call_args = client._session.request.call_args
         assert call_args[0][0] == "POST"
-        body = call_args[1]["json"]
+        body = _sent_body(client)
         assert body["data"]["type"] == "requirements"
         assert body["data"]["attributes"]["action"] == "agree"
         assert body["data"]["attributes"]["role"] == "sign"
@@ -540,8 +595,7 @@ class TestClicksignRequirements:
         )
         assert result == expected
 
-        call_args = client._session.request.call_args
-        body = call_args[1]["json"]
+        body = _sent_body(client)
         assert body["data"]["attributes"]["action"] == "provide_evidence"
         assert body["data"]["attributes"]["auth"] == "email"
 
@@ -595,7 +649,7 @@ class TestClicksignRequirements:
         call_args = client._session.request.call_args
         assert call_args[0][0] == "POST"
         assert "/envelopes/env-123/requirements" in call_args[0][1]
-        body = call_args[1]["json"]
+        body = _sent_body(client)
         assert len(body["data"]) == 2
         assert body["data"][0]["attributes"]["action"] == "agree"
         assert body["data"][1]["attributes"]["action"] == "provide_evidence"
@@ -678,7 +732,7 @@ class TestClicksignWebhooks:
         call_args = client._session.request.call_args
         assert call_args[0][0] == "POST"
         assert "/webhooks" in call_args[0][1]
-        body = call_args[1]["json"]
+        body = _sent_body(client)
         assert body["data"]["type"] == "webhooks"
         assert body["data"]["attributes"]["url"] == "https://my-app.com/webhooks"
         assert body["data"]["attributes"]["events"] == events
